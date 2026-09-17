@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::collar::{Breach, Collar};
 use crate::order::{Limit, Order, Side};
 use crate::policy::{Candidate, Policy, Step};
 
@@ -16,6 +17,14 @@ pub struct Level {
 pub enum Outcome {
     Cleared(Clearing),
     NoTrade(NoTradeReason),
+    /// The book crossed, but the price broke the collar, so the venue extends
+    /// the auction instead of printing. The indicative price and volume are
+    /// what would have traded, which is what an imbalance feed publishes.
+    Extended {
+        breach: Breach,
+        volume: u128,
+        imbalance: i128,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +206,16 @@ impl Book {
         policy: &Policy,
         reference: Option<i64>,
     ) -> Result<Outcome, UncrossError> {
+        self.uncross_with_collar(policy, reference, None)
+    }
+
+    /// As [`Book::uncross`], refusing to print a price outside `collar`.
+    pub fn uncross_with_collar(
+        &self,
+        policy: &Policy,
+        reference: Option<i64>,
+        collar: Option<Collar>,
+    ) -> Result<Outcome, UncrossError> {
         let candidates = self.candidates(reference);
         if candidates.is_empty() {
             let reason = if self.market_bid > 0 && self.market_ask > 0 {
@@ -215,6 +234,15 @@ impl Book {
         let at = self.metrics_at(price);
         if !at.eligible || at.volume == 0 {
             return Err(UncrossError::Unclearable { price });
+        }
+        // The collar is checked on the price the chain chose, not on each
+        // candidate: a venue reserves the auction it was about to hold.
+        if let Some(breach) = collar.and_then(|c| c.check(price, reference)) {
+            return Ok(Outcome::Extended {
+                breach,
+                volume: at.volume,
+                imbalance: at.imbalance,
+            });
         }
         let mut fills = vec![0u64; self.orders.len()];
         self.allocate(Side::Buy, price, at.volume, &mut fills);

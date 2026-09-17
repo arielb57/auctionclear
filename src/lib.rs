@@ -17,11 +17,13 @@
 //! ```
 
 pub mod book;
+pub mod collar;
 pub mod csv;
 pub mod gen;
 pub mod order;
 pub mod policy;
 
 pub use book::{Book, BookError, Clearing, Level, NoTradeReason, Outcome, UncrossError};
+pub use collar::{Breach, Collar};
 pub use order::{Limit, Order, Side};
 pub use policy::{Candidate, Policy, PolicyError, Step, Venue};

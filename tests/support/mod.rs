@@ -29,6 +29,11 @@ pub fn check_invariants(
             }
             return Ok(());
         }
+        // An extension is a decision not to trade yet, so there are no fills
+        // to check. The indicative figures it carries are the same ones the
+        // Cleared arm below verifies, and tests/collar.rs pins that they match
+        // what the same book prints without a collar.
+        Outcome::Extended { .. } => return Ok(()),
         Outcome::NoTrade(NoTradeReason::NoReferencePrice) => {
             let only_market = orders.iter().all(|o| o.limit == Limit::Market);
             let both = [Side::Buy, Side::Sell]

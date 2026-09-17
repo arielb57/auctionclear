@@ -55,6 +55,42 @@ rule text.
 | `nasdaq` | MaxVolume → Eligible → MinAbsImbalance → NearestReference → Lowest | Eligible and Lowest are not in Rule 4752/4754 text |
 | `xetra` | MaxVolume → MinAbsImbalance → ImbalanceSide → Eligible → ClampReference | Eligible is not in the rule text; midpoint when there is no reference |
 
+**Price collars.** Everything above answers "which price?". A venue asks a prior
+question — *should this print?* If the price the book would clear at sits too
+far from a reference, no major exchange simply prints it: Xetra calls the result
+a volatility interruption, Euronext a reservation, the US markets an extension
+under the limit up-limit down bands. In each case the auction is prolonged and
+the imbalance published so somebody can react to it.
+
+That makes a collar a third outcome rather than another filter. Dropping the
+offending price from the candidate set would be wrong twice over: the auction
+would print at some other, worse price, and the caller would never learn the
+venue had stepped in.
+
+```
+$ cat spike.csv
+# reference: 100
+id,side,price,qty,time
+1,buy,140,500,0
+2,sell,135,500,1
+
+$ auctionclear run spike.csv --venue sse
+price      137
+
+$ auctionclear run spike.csv --venue sse --collar-bps 1000
+price      none (auction extended)
+collar     137 is 3700 bps from the reference 100, past the 1000 bps collar
+indicative 137
+volume     500 (would have traded)
+imbalance  0
+```
+
+The four presets disagree about the price. They cannot disagree about whether
+the venue steps in, because each checks the price it chose — `tests/collar.rs`
+pins that, along with the band edge printing (rounding is the permissive
+direction), a missing reference meaning no band rather than no trade, and a
+book that never crossed staying a no-trade instead of becoming an extension.
+
 **Allocation.** At the chosen price the executable orders on each side fall into
 three priority groups: market orders, limit orders priced through the price, and
 limit orders at the price. Groups fill whole, in that order, until one doesn't
@@ -244,9 +280,14 @@ means something.
 
 - The presets are "style" presets, paraphrased from rule text. They are not
   certified reproductions of any exchange. Real auctions add things this crate
-  doesn't model: price collars and volatility interruptions, auction extensions,
-  hidden or iceberg quantity, odd-lot and minimum-quantity handling, and the
-  venue's exact choice of reference price.
+  doesn't model: hidden or iceberg quantity, odd-lot and minimum-quantity
+  handling, and the venue's exact choice of reference price.
+- The collar is one static symmetric band. Real books layer a dynamic band
+  against the last trade on top of a static one against the previous close, and
+  the widths vary by instrument, by time of day and by how many extensions have
+  already happened. `--collar-bps` models the shape, not any venue's table, and
+  nothing here decides how long an extension lasts or what happens at the end
+  of it.
 - Candidate prices are the limit prices in the book. The reference price is a
   candidate only when there are no limit orders. Midpoint and ClampReference
   can return a price between levels, and the tests check it is clearable there.

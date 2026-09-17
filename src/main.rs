@@ -1,11 +1,12 @@
 use std::process::ExitCode;
 
 use auctionclear::gen::{self, Profile, Rng};
-use auctionclear::{csv, Book, Limit, NoTradeReason, Outcome, Side, Venue};
+use auctionclear::{csv, Book, Collar, Limit, NoTradeReason, Outcome, Side, Venue};
 
 const USAGE: &str = "\
 usage:
-  auctionclear run <orders.csv> --venue <sse|szse|nasdaq|xetra> [--reference <ticks>] [--levels]
+  auctionclear run <orders.csv> --venue <sse|szse|nasdaq|xetra> [--reference <ticks>]
+                                [--collar-bps <n>] [--levels]
   auctionclear gen [--profile <uniform|tie-heavy|market-heavy|extreme|mixed>] [--orders <n>] [--seed <n>]
   auctionclear venues";
 
@@ -91,6 +92,13 @@ fn cmd_run(args: &[String]) -> Result<String, String> {
         Venue::from_name(venue_name).ok_or_else(|| format!("unknown venue {venue_name:?}"))?;
     let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
     let file = csv::parse(&text).map_err(|e| format!("{path}: {e}"))?;
+    let collar = match flag_value(args, "--collar-bps")? {
+        Some(v) => Some(Collar::new(parse_num::<u32>(
+            v,
+            "collar width in basis points",
+        )?)),
+        None => None,
+    };
     let reference = match flag_value(args, "--reference")? {
         Some(v) => Some(parse_num::<i64>(v, "reference price")?),
         None => file.reference,
@@ -98,7 +106,7 @@ fn cmd_run(args: &[String]) -> Result<String, String> {
     let book = Book::new(file.orders).map_err(|e| e.to_string())?;
     let policy = venue.policy();
     let outcome = book
-        .uncross(&policy, reference)
+        .uncross_with_collar(&policy, reference, collar)
         .map_err(|e| e.to_string())?;
 
     let mut out = String::new();
@@ -135,6 +143,22 @@ fn cmd_run(args: &[String]) -> Result<String, String> {
                 NoTradeReason::NoReferencePrice => "only market orders and no reference price",
             };
             out.push_str(&format!("price      none ({why})\nvolume     0\n"));
+        }
+        Outcome::Extended {
+            breach,
+            volume,
+            imbalance,
+        } => {
+            let pressure = match imbalance.signum() {
+                1 => format!("{imbalance:+} (buy surplus)"),
+                -1 => format!("{imbalance} (sell surplus)"),
+                _ => "0".to_string(),
+            };
+            out.push_str("price      none (auction extended)\n");
+            out.push_str(&format!("collar     {breach}\n"));
+            out.push_str(&format!("indicative {}\n", breach.indicative));
+            out.push_str(&format!("volume     {volume} (would have traded)\n"));
+            out.push_str(&format!("imbalance  {pressure}\n"));
         }
         Outcome::Cleared(c) => {
             let imbalance = match c.imbalance.signum() {

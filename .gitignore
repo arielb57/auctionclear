@@ -2,3 +2,4 @@
 Cargo.lock.bak
 *.orig
 .DS_Store
+.forge.json
