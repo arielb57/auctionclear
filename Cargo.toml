@@ -1,0 +1,20 @@
+[package]
+name = "auctionclear"
+version = "0.1.0"
+edition = "2021"
+description = "Call-auction uncrossing with venue tie-break chains, checked against a brute-force reference"
+license = "MIT"
+readme = "README.md"
+keywords = ["auction", "exchange", "uncross", "trading", "simulation"]
+categories = ["finance", "algorithms", "command-line-utilities"]
+
+[dependencies]
+
+[[bench]]
+name = "uncross"
+harness = false
+
+# The differential tests run a brute-force oracle over 100k+ books; an
+# unoptimised build turns seconds into minutes.
+[profile.test]
+opt-level = 2
